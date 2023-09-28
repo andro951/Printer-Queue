@@ -15,13 +15,6 @@ Description - Program used to simulate jobs being prioritized to a group of prin
 #include <vector>
 #include <iomanip>
 
-enum JobSizeID {
-    Small,
-    Medium,
-    Large,
-    VeryLarge
-};
-
 //Constants
 const int MILLISECONDS_PER_SECOND = 1000;
 const int SECONDS_PER_MINUTE = 60;
@@ -63,21 +56,8 @@ static std::string GetTime() {
 }
 
 /// <summary>
-/// Convert number of pages to a JobSizeID.
+/// Used to store information about print jobs sent to printers.
 /// </summary>
-int GetJobSize(int pages) {
-    if (pages <= 10)
-        return Small;
-
-    if (pages <= 25)
-        return Medium;
-
-    if (pages <= 50)
-        return Large;
-
-    return VeryLarge;
-}
-
 struct PrintJob {
     int ID;
     int Pages;
@@ -85,10 +65,6 @@ struct PrintJob {
         static int jobCount = 0;
         ID = jobCount++;
         Pages = pages;
-    }
-
-    int Size() {
-        return GetJobSize(Pages);
     }
 
     std::string ToString() {
@@ -100,11 +76,11 @@ struct PrintJob {
 
 class Printer {
     std::chrono::high_resolution_clock::time_point start;
-    int pagesPrinted = 0;
-    int totalPagesRemaining = 0;
+    int pagesPrinted = 0;//Pages printed for the current job
+    int totalPagesRemaining = 0;//Tracks pages for all jobs in the queue, not just the current job
     int printerID;
     std::queue<PrintJob> printQueue;
-    bool printing = false;
+    bool printing = false;//Tracks if the printer is currently printing the first job in the queue
 public:
     Printer() {
         static int printerCount = 0;
@@ -115,12 +91,14 @@ public:
         if (NoJobs())
             return;
 
+        //Update pages printed
         auto timeSinceStart = std::chrono::duration_cast<std::chrono::milliseconds>(simulatedTime - start);
         pagesPrinted = timeSinceStart.count() / MILLISECONDS_PER_SHEET;
         PrintJob& currentJob = printQueue.front();
         if (pagesPrinted > currentJob.Pages)
             pagesPrinted = currentJob.Pages;
 
+        //If the job is complete, remove it from the queue and start the next job
         if (JobComplete()) {
             std::cout << GetTime() << " " << Name() << " finished printing " << currentJob.ToString() << std::endl;
             totalPagesRemaining -= currentJob.Pages;
@@ -185,6 +163,9 @@ public:
         return ss.str();
     }
 
+    /// <summary>
+    /// Should only be called at the end of the simulation because it will clear the queue.
+    /// </summary>
     void LogRemainingJobs() {
         if (NoJobs()) {
             std::cout << "No jobs remaining." << std::endl;
@@ -209,36 +190,42 @@ public:
 
 static std::vector<Printer> printers;
 
+/// <summary>
+/// Creates a random number of pages for a print job.  Lower numbers of pages are more likely.
+/// </summary>
 int GetRandomPrintJob() {
     int r = rand() % 10;
     if (r <= 3)
-        return rand() % 10 + 1;
+        return 1 + rand() % 10;//40% chance for 1-10 pages
 
     if (r <= 6)
-        return rand() % 15 + 11;
+        return 11 + rand() % 15;//30% chance for 11-25 pages
 
     if (r <= 8)
-        return rand() % 25 + 26;
+        return 26 + rand() % 25;//20% chance for 26-50 pages
 
-    return rand() % 49 + 51;
+    return 51 + rand() % 49;//10% chance for 51-100 pages
 }
 
 void Update() {
-    //std::cout << "Update " << GetTime() << std::endl;
+    //Update the printers pages printed and check if their current job is complete
     for (int i = 0; i < printers.size(); i++) {
         Printer& printer = printers[i];
         printer.Update();
     }
 
+    //Add a new job every 30 seconds
     static auto nextJobTime = simulatedTime;
     static auto timePerJob = std::chrono::seconds(30);
     auto timeSinceLastJob = std::chrono::duration_cast<std::chrono::seconds>(simulatedTime - nextJobTime);
-    //Add a new job every 30 seconds
     if (timeSinceLastJob >= timePerJob) {
         nextJobTime += timePerJob;
+
+        //Create a new random print job
         int jobSize = GetRandomPrintJob();
         PrintJob job(jobSize);
         std::cout << GetTime() << " created " << job.ToString() << std::endl;
+
         //Find the printer with the least amount of pages left to print and add the job to that printer
         int selectedForNewJob = 0;
         for (int i = 0; i < printers.size(); i++) {
@@ -258,12 +245,16 @@ void Update() {
                 selectedForNewJob = i;
         }
 
+        //Add the job to the selected printer
         Printer& selectedPrinter = printers[selectedForNewJob];
         selectedPrinter.Print(job);
         std::cout << std::endl;
     }
 }
 
+/// <summary>
+/// Checks if 1 simulated second has passed since the last update.
+/// </summary>
 bool ShouldUpdate() {
     static auto lastUpdate = std::chrono::high_resolution_clock::now();
     long long timeSinceLastUpdate = std::chrono::duration_cast<std::chrono::milliseconds>(simulatedTime - lastUpdate).count();
@@ -302,7 +293,7 @@ void Run() {
             Update();
 
         //Sleep
-        std::this_thread::sleep_for(std::chrono::microseconds(1));
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 }
 
